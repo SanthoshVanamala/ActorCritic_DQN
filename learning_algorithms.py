@@ -32,9 +32,9 @@ class ACTrainer:
             self.update_actor_net()
             # TODO: Calculate avg reward for this rollout
             # HINT: Add all the rewards from each trajectory. There should be "ntr" trajectories within a single rollout.
-            avg_ro_reward = sum([sum(traj['reward']) for traj in self.trajectory])/self.params['n_trajectory_per_rollout']  
-            print(f'End of rollout {ro_idx}: Average trajectory reward is {avg_ro_reward: 0.2f}')
-            # Append average rollout reward into a list
+            avg_ro_reward = sum([sum(traj['reward']) for traj in self.trajectory])/self.params['n_trajectory_per_rollout'] #summing all trajectories and storing average reward  
+            print(f'End of rollout {ro_idx}: Average trajectory reward is {avg_ro_reward: 0.2f}')#print average rollout reward
+            # Append the average rollout reward into a list
             list_ro_reward.append(avg_ro_reward)
         # Save avg-rewards as pickle files
         pkl_file_name = self.params['exp_name'] + '.pkl'
@@ -57,25 +57,26 @@ class ACTrainer:
     def update_target_value(self, gamma=0.99):
         # TODO: Update target values
         # HINT: Use definition of target-estimate from equation 7 of teh assignment PDF
-        states = torch.tensor(self.trajectory['state'], dtype=torch.float32, device=get_device())
+        states = torch.tensor(self.trajectory['state_value'], dtype=torch.float32, device=get_device())# creating a tensor and passing dtype argument
         with torch.no_grad():
-            target_values = self.critic_net(states)
-            target_values = target_values.squeeze(dim=1).tolist()
+            target_values = self.critic_net(states)#obtain predicted q values for each state
+            target_values = target_values.squeeze(dim=1).tolist()# and convert it to list
 
-        self.trajectory['state_value'] = target_values[:-1]
-        self.trajectory['target_value'] = target_values[1:]
+        self.trajectory['state_value'] = target_values[:-1]#updated predicted Q values expect for last state
+        self.trajectory['target_value'] = target_values[1:]#updated predicted Q values expect for first state
 
 
 
     def estimate_advantage(self, gamma=0.99):
         # TODO: Estimate advantage
         # HINT: Use definition of advantage-estimate from equation 6 of teh assignment PDF
-        advantage = []
+        advantage = []#  an empty list
         for i  in range(self.params['n_trajectory_per_rollout']):
             adv = list()
-            for j in range(len(self.trajectory['state'][i])):
+            for j in range(len(self.trajectory['state_value'][i])):
+                # Calculate the advantage 
                 result = self.trajectory['reward'][i][j] + gamma * self.trajectory['state_value'][i][j + 1] * (1 - self.trajectory['terminated'][i][j]) - self.trajectory['state_value'][i][j]
-                adv.append(result)
+                adv.append(result)#append to list
         advantage.append(adv)
         self.trajectory['advantage'] = torch.tensor(advantage, dtype=torch.float32, device=get_device())
 
@@ -88,10 +89,10 @@ class ACTrainer:
     def estimate_critic_loss_function(self):
         # TODO: Compute critic loss function
         # HINT: Use definition of critic-loss from equation 7 of teh assignment PDF. It is the MSE between target-values and state-values.
-        states = torch.tensor(self.trajectory['state'], dtype=torch.float32, device=get_device())
+        states = torch.tensor(self.trajectory['state_value'], dtype=torch.float32, device=get_device())
         target_values = torch.tensor(self.trajectory['target_value'], dtype=torch.float32, device=get_device()).unsqueeze(1)
         state_values = self.critic_net(states)
-        critic_loss = nn.MSELoss()(target_values, state_values)
+        critic_loss = nn.MSELoss()(target_values, state_values)#MSE between target and state values
         return critic_loss
 
     def estimate_actor_loss_function(self):
@@ -100,7 +101,7 @@ class ACTrainer:
             advantage = apply_discount(self.trajectory['advantage'][t_idx])
             # TODO: Compute actor loss function
             log_probs = self.trajectory['log_prob'][t_idx]
-            actor_loss.append(torch.mean(-log_probs * advantage))
+            actor_loss.append(torch.mean(-log_probs * advantage))#calculating actor loss
         actor_loss = torch.stack(actor_loss).mean()
         return actor_loss
 
@@ -130,11 +131,11 @@ class ActorNet(nn.Module):
     def forward(self, obs):
         # TODO: Forward pass of actor net
         # HINT: (use Categorical from torch.distributions to draw samples and log-prob from model output)
-        x = self.ff_net(obs)
-        dist = Categorical(logits=x)
+        x = self.ff_net(obs)# Pass obs through ff net
+        dist = Categorical(logits=x)# Use Categorical  to draw samples and log-prob from model output
         action_index = dist.sample()
         log_prob = dist.log_prob(action_index)
-        return action_index, log_prob
+        return action_index, log_prob# Return action index and  log prob
 
 
 # CLass for actor-net
@@ -152,8 +153,8 @@ class CriticNet(nn.Module):
     def forward(self, obs):
         # TODO: Forward pass of critic net
         # HINT: (get state value from the network using the current observation)
-        state_value = self.ff_net(obs)
-        return state_value
+            state_value = self.ff_net(obs)#pass obs to ff_net neural network
+            return state_value
 
 
 # Class for agent
@@ -241,14 +242,15 @@ class DQNTrainer:
         # TODO: Implement the epsilon-greedy behavior
         # HINT: The agent will will choose action based on maximum Q-value with
         # '1-ε' probability, and a random action with 'ε' probability.
-        if torch.rand(1) < self.epsilon:
-            return self.env.action_space.sample()
+        if torch.rand(1) < self.epsilon: # if random number is less than epsilon
+            return self.env.action_space.sample()# # take random action from action space
         else:
             with torch.no_grad():
+                # convert observation to tensor
                 obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(get_device())
-                q_values = self.q_net(obs_tensor)
-                action = q_values.argmax().item()
-        return action
+                q_values = self.q_net(obs_tensor)# pass tensor through Q-network to get Q-values
+                action = q_values.argmax().item() # select action with highest Q-value
+        return action#return action which is selected
 
     def update_q_net(self):
         if len(self.replay_memory.buffer) < self.params['batch_size']:
@@ -256,22 +258,42 @@ class DQNTrainer:
         # TODO: Update Q-net
         # HINT: You should draw a batch of random samples from the replay buffer
         # and train your Q-net with that sampled batch.
-        
-        transitions = self.replay_memory.sample(self.params['batch_size'])# Draw a batch of random samples from the replay buffer
 
-
-        obs_batch = torch.tensor([t[0] for t in transitions]).float().to(get_device())
-        action_batch = torch.tensor([t[1] for t in transitions]).long().to(get_device())
-        reward_batch = torch.tensor([t[2] for t in transitions]).float().to(get_device())
-        next_obs_batch = torch.tensor([t[3] for t in transitions]).float().to(get_device())
-        mask_batch = torch.tensor([t[4] for t in transitions]).float().to(get_device())
+        # Draw a batch of random samples from the replay buffer
+        transitions = self.replay_memory.sample(self.params['batch_size'])
+        transitions = [t for t in transitions if t is not None]
+        transitions = list(filter(lambda x: x is not None, transitions))
     
+        if len(transitions) == 0:#if no valid transitions in sample then return
+            return
+        #seperating components of transition
+        obs_batch = []
+        action_batch = []
+        reward_batch = []
+        next_obs_batch = []
+        mask_batch = []
+
+        for t in transitions:
+            obs_batch.append(t[0])
+            action_batch.append(t[1])
+            reward_batch.append(t[2])
+            next_obs_batch.append(t[3])
+            mask_batch.append(t[4])
+        #converting batched data into the tensors
+        obs_batch = torch.tensor(obs_batch).float().to(get_device())
+        action_batch = torch.tensor(action_batch).long().to(get_device())
+        reward_batch = torch.tensor(reward_batch).float().to(get_device())
+        next_obs_batch = torch.tensor(next_obs_batch).float().to(get_device())
+        mask_batch = torch.tensor(mask_batch).float().to(get_device())
+        predicted_state_value = self.q_net(obs_batch).gather(1, action_batch)
+
+    # Compute targets for Q-learning update
+        with torch.no_grad():
+            next_q_values = self.target_net(next_obs_batch).max(1)[0].unsqueeze(1)
+            target_value = reward_batch + self.params['gamma'] * mask_batch * next_q_values
+
+
         # Compute predicted state values and target values
-        predicted_state_value = self.q_net(obs_batch).gather(1, action_batch.unsqueeze(1)).squeeze()
-        target_value = reward_batch + mask_batch * self.params['gamma'] * self.target_net(next_obs_batch).max(1)[0]
-    
-
-
         criterion = nn.SmoothL1Loss()
         q_loss = criterion(predicted_state_value, target_value.unsqueeze(1))
         self.optimizer.zero_grad()
@@ -303,13 +325,18 @@ class ReplayMemory:
     # TODO: Implement replay buffer
     # HINT: You can use python data structure deque to construct a replay buffer
     def __init__(self, capacity):
-        self.buffer = deque(maxlen=capacity)
+        self.buffer = deque(maxlen=capacity)#buffer max capacity
 
     def push(self, *args):
-        self.buffer.append(args)
-
+        self.buffer.append(args)#transition is added to the buffer
     def sample(self, n_samples):
-        return random.sample(self.buffer,n_samples)
+        transitions = []#sample transitions from buffer
+        while len(transitions) < n_samples:
+            sample = random.choice(self.buffer)
+            if sample is not None:
+                transitions.append(sample)
+        return transitions
+
 
 
 class QNet(nn.Module):
@@ -317,15 +344,16 @@ class QNet(nn.Module):
     # This is identical to policy network from HW1
     def __init__(self, input_size, output_size, hidden_dim):
         super(QNet, self).__init__()
-        self.input_size = input_size
+        self.input_size = input_size 
         self.output_size = output_size
         self.hidden_dim = hidden_dim
+        #
         self.ff_net = nn.Sequential(
-            nn.Linear(self.input_size, self.hidden_dim),
+            nn.Linear(self.input_size, self.hidden_dim),# input layer
             nn.ReLU(),
-            nn.Linear(self.hidden_dim, self.hidden_dim),
-            nn.ReLU(),
-            nn.Linear(self.hidden_dim, self.output_size)
+            nn.Linear(self.hidden_dim, self.hidden_dim),#hidden layer
+            nn.ReLU(),#second layer activation function
+            nn.Linear(self.hidden_dim, self.output_size)#output layer
         )
 
     def forward(self, obs):
